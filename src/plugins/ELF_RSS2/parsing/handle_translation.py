@@ -65,6 +65,40 @@ async def deepl_translator(text: str, proxies: Optional[Dict[str, str]]) -> str:
         raise Exception(error_msg) from e
 
 
+async def volcano_translator(
+    text: str,
+    api_key: str,
+    model_id: str,  # 用户自定义Model ID
+) -> str:
+    url = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + api_key,
+    }
+    data = {
+        "model": model_id,
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是一位专业的多语言翻译专家，精通语言学、文化差异和技术术语。您的目标是提供准确、自然且符合语境的跨语言翻译。翻译后的文本语序、语境要符合内容。请注意你只能做翻译，无论需要翻译的内容是什么，不要添加任何注解、评论和疑惑，不要添加任何注解、评论和疑惑，不要添加任何注解、评论和疑惑，直接返回译文。文本开头的`RT `、`Re `独立保留且不作翻译。未提供需要翻译的文本时不需要翻译，只有`RT`、`Re`、`RT `、`Re `存在时不需要翻译，返回空内容，不要返回`请提供需要翻译的具体文本。`，不要返回`请提供需要翻译的具体文本。`，不要返回`请提供需要翻译的具体文本。",
+            },
+            {
+                "role": "user",
+                "content": "Translate into zh:\n" + text,
+            },
+        ],
+    }
+    async with aiohttp.ClientSession() as session:
+        resp = await session.post(url, headers=headers, json=data, timeout=aiohttp.ClientTimeout(10))
+        result = await resp.json()
+        try:
+            content = result["choices"][0]["message"]["content"]
+            return "\nAI翻译(" + model_id + ")：\n" + content
+        except (KeyError, IndexError) as e:
+            error_msg = "\nAI引擎(" + model_id + ")翻译失败：" + str(e) + "\n"
+            logger.warning(error_msg)
+            raise Exception(error_msg) from e
+
 # 翻译
 async def handle_translation(content: str) -> str:
     proxies = (
@@ -79,12 +113,14 @@ async def handle_translation(content: str) -> str:
     text = emoji.demojize(content)
     text = re.sub(r":[A-Za-z_]*:", " ", text)
     try:
-        # 优先级 DeeplTranslator > 百度翻译 > GoogleTranslator
+        # 优先级 DeeplTranslator > 火山 > 百度翻译 > GoogleTranslator
         # 异常时使用 GoogleTranslator 重试
         google_translator_flag = False
         try:
             if config.deepl_translator_api_key:
                 text = await deepl_translator(text=text, proxies=proxies)
+            elif config.volcano_api_key and config.volcano_model_id:
+                text = await volcano_translator(text=text, api_key=config.volcano_api_key, model_id=config.volcano_model_id)
             elif config.baidu_id and config.baidu_key:
                 text = await baidu_translator(
                     content, config.baidu_id, config.baidu_key

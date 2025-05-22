@@ -41,6 +41,10 @@ class ELFConfig(Config):
     deepl_translator_api_key: Optional[str] = None
     # 配合 deepl_translator 使用的语言检测接口，前往 https://detectlanguage.com/documentation 注册获取 api_key
     single_detection_api_key: Optional[str] = None
+    # 火山引擎API Key，前往 https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey 控制台获取
+    volcano_api_key: Optional[str] = None
+    # 火山方舟API的模型/接入点ID，如doubao-1-5-pro-256k-250115，前往 https://console.volcengine.com/ark/region:ark+cn-beijing/endpoint 控制台获取
+    volcano_model_id: Optional[str] = None
 
     qb_username: Optional[str] = None  # qbittorrent 用户名
     qb_password: Optional[str] = None  # qbittorrent 密码
