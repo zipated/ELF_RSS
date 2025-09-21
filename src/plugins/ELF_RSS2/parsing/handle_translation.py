@@ -87,6 +87,9 @@ async def volcano_translator(
                 "content": "Translate into zh:\n" + text,
             },
         ],
+        "thinking": {
+            "type": "disabled",
+        },
     }
     async with aiohttp.ClientSession() as session:
         resp = await session.post(url, headers=headers, json=data, timeout=aiohttp.ClientTimeout(10))
