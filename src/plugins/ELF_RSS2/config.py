@@ -48,6 +48,11 @@ class ELFConfig(Config):
     baidu_id: Optional[str] = None
     baidu_key: Optional[str] = None
     deepl_translator_api_key: Optional[str] = None
+    # openapi
+    openapi_key: Optional[str] = None
+    openapi_base_url: Optional[str] = None
+    openapi_model: Optional[str] = None
+    openapi_prompt: Optional[str] = None
     # 配合 deepl_translator 使用的语言检测接口，前往 https://detectlanguage.com/documentation 注册获取 api_key
     single_detection_api_key: Optional[str] = None
 

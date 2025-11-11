@@ -64,6 +64,63 @@ async def deepl_translator(text: str, proxies: Optional[Dict[str, str]]) -> str:
         logger.warning(error_msg)
         raise Exception(error_msg) from e
 
+async def ai_translator(text: str, proxies: Optional[Dict[str, str]]) -> str:
+    lang = None
+    LANGUAGE_MAP = {
+        "ar": "阿拉伯语",
+        "de": "德语",
+        "en": "英语",
+        "eo": "世界语",
+        "es": "西班牙语",
+        "fi": "芬兰语",
+        "fr": "法语",
+        "ia": "国际语",
+        "it": "意大利语",
+        "ja": "日语",
+        "ko": "韩语",
+        "pt": "葡萄牙语",
+        "zh": "中文",
+    }
+    if config.single_detection_api_key:
+        lang = single_detection(text, api_key=config.single_detection_api_key)
+        lang = LANGUAGE_MAP.get(lang, lang)
+    if config.openapi_prompt:
+        if "{lang}" in config.openapi_prompt:
+            prompt = config.openapi_prompt.format(lang=lang)
+        else:
+            prompt = config.openapi_prompt
+    else:
+        if lang:
+            prompt = f"你是一个专业的多语言翻译器，请提供从{lang}到准确、自然且符合语境的简体中文翻译。"
+        else:
+            prompt = f"你是一个专业的多语言翻译器，请提供准确、自然且符合语境的简体中文翻译。"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + config.openapi_key,
+    }
+    data = {
+        "model": config.openapi_model,
+        "messages": [
+            {
+                "role": "system",
+                "content": prompt
+            },
+            {
+                "role": "user",
+                "content": text
+            }
+        ]
+    }
+    async with aiohttp.ClientSession() as session:
+        resp = await session.post(config.openapi_base_url, headers=headers, json=data, proxy=proxies, timeout=aiohttp.ClientTimeout(10))
+        result = await resp.json()
+        try:
+            content = result["choices"][0]["message"]["content"]
+            return "\nAI翻译(" + config.openapi_model + ")：\n" + content
+        except (KeyError, IndexError) as e:
+            error_msg = "\nAI(" + config.openapi_model + ")翻译失败：" + str(e) + "\n"
+            logger.warning(error_msg)
+            raise Exception(error_msg) from e
 
 # 翻译
 async def handle_translation(content: str) -> str:
@@ -83,7 +140,9 @@ async def handle_translation(content: str) -> str:
         # 异常时使用 GoogleTranslator 重试
         google_translator_flag = False
         try:
-            if config.deepl_translator_api_key:
+            if config.openapi_key:
+                text = await ai_translator(text=text, proxies=config.rss_proxy)
+            elif config.deepl_translator_api_key:
                 text = await deepl_translator(text=text, proxies=proxies)
             elif config.baidu_id and config.baidu_key:
                 text = await baidu_translator(
