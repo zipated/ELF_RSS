@@ -21,7 +21,7 @@ from .utils import get_proxy, get_summary
 async def resize_gif(url: str, resize_ratio: int = 2) -> Optional[bytes]:
     async with aiohttp.ClientSession() as session:
         resp = await session.post(
-            "https://s3.ezgif.com/resize",
+            "https://ezgif.com/resize",
             data={"new-image-url": url},
         )
         d = Pq(await resp.text())
@@ -50,20 +50,18 @@ async def resize_gif(url: str, resize_ratio: int = 2) -> Optional[bytes]:
 async def get_preview_gif_from_video(url: str) -> str:
     async with aiohttp.ClientSession() as session:
         resp = await session.post(
-            "https://s3.ezgif.com/video-to-gif",
+            "https://ezgif.com/video-to-gif",
             data={"new-image-url": url},
         )
         d = Pq(await resp.text())
         video_length = re.search(
-            r"\d\d:\d\d:\d\d", str(d("#main > p.filestats > strong"))
+            r"\d\d:\d\d:\d\d", str(d("p.filestats > strong"))
         ).group()  # type: ignore
         hours = int(video_length.split(":")[0])
         minutes = int(video_length.split(":")[1])
         seconds = int(video_length.split(":")[2])
         video_length_median = (hours * 60 * 60 + minutes * 60 + seconds) // 2
-        next_url = d("form").attr("action")
-        _file = d("form > input[type=hidden]:nth-child(1)").attr("value")
-        token = d("form > input[type=hidden]:nth-child(2)").attr("value")
+        _file = d("input[name=file]").attr("value")
         default_end = d("#end").attr("value")
         if float(default_end) >= 4:
             start = video_length_median - 2
@@ -71,18 +69,21 @@ async def get_preview_gif_from_video(url: str) -> str:
         else:
             start = 0
             end = default_end
+        next_url = f"https://ezgif.com/video-to-gif/{_file}"
         data = {
             "file": _file,
-            "token": token,
             "start": start,
             "end": end,
-            "size": 320,
+            "size": "320p",
             "fps": 25,
-            "method": "ffmpeg",
+            "method": "ffmpeg_dithering",
         }
         resp = await session.post(next_url, params="ajax=true", data=data)
         d = Pq(await resp.text())
-        return f'https:{d("img:nth-child(1)").attr("src")}'
+        img_src = d("img.output").attr("src")
+        if img_src.startswith("//"):
+            return f"https:{img_src}"
+        return img_src
 
 
 # 图片压缩
