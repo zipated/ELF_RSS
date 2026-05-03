@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from nonebot import get_plugin_config
 from nonebot.config import Config
@@ -53,6 +53,7 @@ class ELFConfig(Config):
     openapi_base_url: Optional[str] = None
     openapi_model: Optional[str] = None
     openapi_prompt: Optional[str] = None
+    openapi_extra_params: Optional[Dict] = None
     # 配合 deepl_translator 使用的语言检测接口，前往 https://detectlanguage.com/documentation 注册获取 api_key
     single_detection_api_key: Optional[str] = None
 

@@ -111,6 +111,8 @@ async def ai_translator(text: str, proxies: Optional[Dict[str, str]]) -> str:
             }
         ]
     }
+    if config.openapi_extra_params:
+        data.update(config.openapi_extra_params)
     async with aiohttp.ClientSession() as session:
         resp = await session.post(config.openapi_base_url, headers=headers, json=data, proxy=proxies, timeout=aiohttp.ClientTimeout(10))
         result = await resp.json()
