@@ -1,5 +1,7 @@
+import json
+import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from nonebot import get_plugin_config
 from nonebot.config import Config
@@ -78,4 +80,42 @@ class ELFConfig(Config):
 
 
 config = get_plugin_config(ELFConfig)
+
+
+def _parse_openapi_nodes(cfg: ELFConfig) -> List[Dict[str, Any]]:
+    # 解析多节点 OpenAI 兼容 API 配置，支持 AI_API_KEY1/2/... 动态数量
+    # AI_API_KEY 作为默认节点，编号节点追加在其后，两者可同时配置
+    nodes: List[Dict[str, Any]] = []
+    if cfg.openapi_key:
+        default_use_proxy = os.environ.get("AI_API_USE_PROXY", "").lower() == "true"
+        nodes.append({
+            "key": cfg.openapi_key,
+            "base_url": cfg.openapi_base_url,
+            "model": cfg.openapi_model,
+            "prompt": cfg.openapi_prompt,
+            "extra_params": cfg.openapi_extra_params,
+            "use_proxy": default_use_proxy,
+        })
+    for i in range(1, 100):
+        key = os.environ.get(f"AI_API_KEY{i}")
+        if not key:
+            break
+        base_url = os.environ.get(f"AI_API_BASE_URL{i}", cfg.openapi_base_url)
+        model = os.environ.get(f"AI_API_MODEL{i}", cfg.openapi_model)
+        prompt = os.environ.get(f"AI_API_PROMPT{i}", cfg.openapi_prompt)
+        extra_params_raw = os.environ.get(f"AI_API_EXTRA_PARAMS{i}")
+        extra_params = json.loads(extra_params_raw) if extra_params_raw else cfg.openapi_extra_params
+        use_proxy = os.environ.get(f"AI_API_USE_PROXY{i}", "").lower() == "true"
+        nodes.append({
+            "key": key,
+            "base_url": base_url,
+            "model": model,
+            "prompt": prompt,
+            "extra_params": extra_params,
+            "use_proxy": use_proxy,
+        })
+    return nodes
+
+
+config.openapi_nodes = _parse_openapi_nodes(config)
 logger.debug(f"RSS Config loaded: {config!r}")

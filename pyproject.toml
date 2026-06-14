@@ -35,6 +35,7 @@ python-qbittorrent = "^0.4.3"
 tenacity = "^8.5.0"
 tinydb = "^4.8.2"
 yarl = "^1.24.2"
+litellm = "^1.89.0"
 
 [tool.poetry.group.dev.dependencies]
 nb-cli = "^1.7.4"

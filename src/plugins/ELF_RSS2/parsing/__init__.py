@@ -136,7 +136,7 @@ async def handle_title(rss: Rss, item: Dict[str, Any]) -> str:
     if not rss.only_title:
         res += "\n"
     if rss.translation:
-        res += await handle_translation(content=title)
+        res += await handle_translation(content=title, rss_name=rss.name, rss_url=rss.url)
 
     # 如果开启了只推送标题，跳过下面判断标题与正文相似度的处理
     if rss.only_title:
@@ -193,7 +193,7 @@ async def handle_summary(rss: Rss, tmp: str) -> str:
 @ParsingBase.append_handler(parsing_type="summary", priority=12)  # type: ignore
 async def handle_summary(rss: Rss, tmp: str) -> str:
     if rss.translation:
-        tmp += await handle_translation(tmp)
+        tmp += await handle_translation(tmp, rss_name=rss.name, rss_url=rss.url)
     return tmp
 
 
