@@ -152,11 +152,11 @@ async def generate_knowledge_base(rss_url: str, rss_name: str) -> Optional[Dict[
         logger.warning(f"[{rss_name}] 未能获取到有效的网页内容，跳过资料库生成")
         return None
 
-    if not config.openapi_nodes:
+    if not config.ai_api_nodes:
         logger.warning("未配置 AI API 节点，无法生成资料库")
         return None
 
-    kb_data = await _generate_kb_with_ai(all_text, config.openapi_nodes[0])
+    kb_data = await _generate_kb_with_ai(all_text, config.ai_api_nodes[0])
     if not kb_data:
         return None
 

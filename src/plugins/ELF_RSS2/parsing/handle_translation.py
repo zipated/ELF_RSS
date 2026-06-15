@@ -204,7 +204,7 @@ async def ai_translator(
         kb_data = load_knowledge_base(rss_name)
 
     last_error: Optional[Exception] = None
-    for node in config.openapi_nodes:
+    for node in config.ai_api_nodes:
         try:
             result = await _ai_translate_with_node(
                 text=text,
@@ -249,7 +249,7 @@ async def handle_translation(
         last_error: Optional[Exception] = None
 
         # 1. AI 翻译（多节点，内部已按顺序尝试）
-        if config.openapi_nodes:
+        if config.ai_api_nodes:
             try:
                 text = await ai_translator(
                     text=text,
