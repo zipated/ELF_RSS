@@ -1,44 +1,49 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import aiohttp
+import feedparser
 import litellm
 from nonebot.log import logger
-from pyquery import PyQuery as Pq
 
 from ..config import DATA_PATH, config
-from ..parsing.utils import get_proxy
 
 litellm.suppress_debug_info = True
 
 KB_PATH = DATA_PATH / "kb"
 
-# 爬取时尝试的子页面路径
-_SUB_PATHS = ["/about", "/info", "/about/", "/info/", "/about.html", "/info.html"]
+_SEARCH_API_URL = "https://open.feedcoopapi.com/search_api/web_search"
 
 _KB_GENERATE_PROMPT = """\
-你是一个专业的资料库生成助手。请根据以下网页内容，为该 RSS 订阅来源生成结构化的翻译辅助资料库。
+你是一个专业的资料库生成助手。请根据以下 RSS 来源的信息和搜索结果，生成结构化的翻译辅助资料库。
+
+来源信息：
+- 来源标题：{feed_title}
+- 来源链接：{feed_link}
+- 来源描述：{feed_description}
+
+联网搜索结果：
+{search_results}
 
 请生成 JSON 格式的资料库，包含：
-1. background: 该来源的简要背景描述（2-5句话）
+1. background: 该来源的简要背景描述（2-5句话，根据标题、链接、搜索结果和你的知识描述这是什么类型的来源、主要内容方向）
 2. terminology: 常见专业术语的翻译对照表（至少5条，如果没有明显的专业术语则为空列表）
 
 要求：
 - 术语应包含来源语言原文和对应的中文翻译
+- 翻译保持简洁本意，不要加括号注释、解释或补充说明。例如「歌ってみた」翻译为「翻唱」而非「翻唱（歌曲翻唱视频）」，专有名词如「FANBOX」直接使用原名
 - 如果来源已经是中文，背景描述用中文，术语列表留空
 - 只输出 JSON，不要其他内容
 
 JSON 格式示例：
-{
+{{
   "background": "...",
   "terminology": [
-    {"source": "English Term", "translation": "中文翻译"},
-    {"source": "Another Term", "translation": "另一个翻译"}
+    {{"source": "English Term", "translation": "中文翻译"}},
+    {{"source": "Another Term", "translation": "另一个翻译"}}
   ]
-}
-
-网页内容：
+}}
 """
 
 
@@ -47,7 +52,6 @@ def _get_kb_path(rss_name: str) -> Path:
 
 
 def load_knowledge_base(rss_name: str) -> Optional[Dict[str, Any]]:
-    # 加载指定订阅的资料库
     path = _get_kb_path(rss_name)
     if not path.exists():
         return None
@@ -60,7 +64,6 @@ def load_knowledge_base(rss_name: str) -> Optional[Dict[str, Any]]:
 
 
 def get_knowledge_base_prompt(kb_data: Dict[str, Any]) -> str:
-    # 将资料库数据转为注入翻译 prompt 的文本
     parts = []
 
     if background := kb_data.get("background"):
@@ -78,29 +81,89 @@ def get_knowledge_base_prompt(kb_data: Dict[str, Any]) -> str:
     return "以下是该 RSS 来源的相关背景资料，请在翻译时参考以提高准确性：\n\n" + "\n\n".join(parts)
 
 
-async def _fetch_page_text(url: str, proxy: Optional[str]) -> str:
-    # 抓取页面并提取文本内容
+async def _fetch_feed_metadata(rss_url: str) -> tuple:
+    # 抓取 RSS feed 提取标题/链接/描述
     try:
-        timeout = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            resp = await session.get(url, proxy=proxy)
-            html = await resp.text()
-            doc = Pq(html)
-            doc("script").remove()
-            doc("style").remove()
-            text = doc.text()
-            return text[:3000]
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(10)) as session:
+            resp = await session.get(rss_url)
+            d = feedparser.parse(await resp.text())
+            feed = d.get("feed", {})
+            return (
+                feed.get("title"),
+                feed.get("link"),
+                feed.get("description") or feed.get("subtitle"),
+            )
     except Exception as e:
-        logger.debug(f"抓取页面失败 [{url}]: {e}")
-        return ""
+        logger.debug(f"抓取 feed 元数据失败 [{rss_url}]: {e}")
+        return None, None, None
 
 
-async def _generate_kb_with_ai(content: str, node: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    # 使用 AI（LiteLLM）从网页内容生成资料库
-    prompt = _KB_GENERATE_PROMPT + content
+async def _search_web(query: str) -> List[Dict[str, str]]:
+    # 调用火山引擎联网搜索 API
+    payload = {
+        "Query": query[:100],
+        "SearchType": "web",
+        "Count": 20,
+        "NeedSummary": True,
+    }
+    if config.kb_search_sites:
+        payload.setdefault("Filter", {})["Sites"] = config.kb_search_sites
+    if config.kb_search_block_hosts:
+        payload.setdefault("Filter", {})["BlockHosts"] = config.kb_search_block_hosts
+
+    headers = {
+        "Authorization": f"Bearer {config.kb_search_api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(15)) as session:
+            async with session.post(_SEARCH_API_URL, json=payload, headers=headers) as resp:
+                data = await resp.json()
+                results = data.get("Result", {}).get("WebResults", [])
+                return [
+                    {
+                        "title": r.get("Title", ""),
+                        "snippet": r.get("Summary") or r.get("Snippet", ""),
+                        "url": r.get("Url", ""),
+                    }
+                    for r in results
+                ]
+    except Exception as e:
+        logger.warning(f"联网搜索失败 [{query}]: {e}")
+        return []
+
+
+def _format_search_results(results: List[Dict[str, str]]) -> str:
+    if not results:
+        return "无搜索结果"
+    lines = []
+    for i, r in enumerate(results[:10], 1):
+        lines.append(f"{i}. {r['title']}\n   {r['snippet'][:300]}\n   {r['url']}")
+    return "\n\n".join(lines)
+
+
+async def _generate_kb_with_ai(
+    node: Dict[str, Any],
+    feed_title: str,
+    feed_link: str,
+    feed_description: str,
+    search_results: List[Dict[str, str]],
+) -> Optional[Dict[str, Any]]:
+    prompt = _KB_GENERATE_PROMPT.format(
+        feed_title=feed_title or "未知",
+        feed_link=feed_link or "未知",
+        feed_description=feed_description or "无",
+        search_results=_format_search_results(search_results),
+    )
+
+    model = node.get("model") or "gpt-4o-mini"
+    base_url = node.get("base_url")
+    if base_url and "/" not in model:
+        model = f"openai/{model}"
 
     kwargs: Dict[str, Any] = {
-        "model": node.get("model") or "gpt-4o-mini",
+        "model": model,
         "messages": [
             {"role": "system", "content": "你只输出 JSON，不输出其他内容。"},
             {"role": "user", "content": prompt},
@@ -119,44 +182,64 @@ async def _generate_kb_with_ai(content: str, node: Dict[str, Any]) -> Optional[D
         content_text = content_text.strip()
         if content_text.startswith("```"):
             content_text = content_text.split("\n", 1)[1].rsplit("```", 1)[0]
+        first_brace = content_text.find("{")
+        last_brace = content_text.rfind("}")
+        if first_brace != -1 and last_brace > first_brace:
+            content_text = content_text[first_brace : last_brace + 1]
+        else:
+            content_text = "{" + content_text + "}"
         return json.loads(content_text)
     except Exception as e:
         logger.warning(f"AI 生成资料库失败: {e}")
         return None
 
 
-async def generate_knowledge_base(rss_url: str, rss_name: str) -> Optional[Dict[str, Any]]:
-    # 爬取来源网站 + AI 生成资料库
-    proxy = get_proxy()
+async def generate_knowledge_base(
+    rss_url: str,
+    rss_name: str,
+    feed_title: Optional[str] = None,
+    feed_link: Optional[str] = None,
+    feed_description: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    path = _get_kb_path(rss_name)
+    if path.exists():
+        logger.info(f"[{rss_name}] 资料库文件已存在，跳过生成")
+        return load_knowledge_base(rss_name)
 
-    from yarl import URL
-
-    parsed = URL(rss_url)
-    base = f"{parsed.scheme}://{parsed.host}"
-
-    logger.info(f"正在为 [{rss_name}] 生成资料库，爬取来源网站...")
-    main_text = await _fetch_page_text(base, proxy)
-
-    sub_texts = []
-    for path in _SUB_PATHS:
-        sub_url = base + path
-        text = await _fetch_page_text(sub_url, proxy)
-        if text:
-            sub_texts.append(text)
-
-    all_text = main_text
-    if sub_texts:
-        all_text += "\n\n补充页面内容：\n" + "\n\n".join(sub_texts)
-
-    if not all_text.strip():
-        logger.warning(f"[{rss_name}] 未能获取到有效的网页内容，跳过资料库生成")
+    if not config.kb_search_api_key:
+        logger.warning("未配置 KB_SEARCH_API_KEY，无法生成资料库")
         return None
 
     if not config.ai_api_nodes:
         logger.warning("未配置 AI API 节点，无法生成资料库")
         return None
 
-    kb_data = await _generate_kb_with_ai(all_text, config.ai_api_nodes[0])
+    kb_nodes = [n for n in config.ai_api_nodes if n.get("kb_enabled", True)]
+    if not kb_nodes:
+        logger.warning("所有 AI API 节点均已关闭资料库生成功能，无法生成资料库")
+        return None
+
+    # 1. 抓取 RSS feed 获取标题等元数据
+    if not feed_title:
+        title, link, desc = await _fetch_feed_metadata(rss_url)
+        feed_title = feed_title or title
+        feed_link = feed_link or link
+        feed_description = feed_description or desc
+
+    # 2. 用标题搜索
+    search_query = feed_title or rss_name
+    logger.info(f"正在为 [{rss_name}] 生成资料库，搜索: {search_query[:50]}...")
+    search_results = await _search_web(search_query) if search_query else []
+
+    # 3. AI 生成
+    logger.info(f"正在为 [{rss_name}] 生成资料库（基于 AI 知识 + {len(search_results)} 条搜索结果）...")
+    kb_data = await _generate_kb_with_ai(
+        node=kb_nodes[0],
+        feed_title=feed_title or "未知",
+        feed_link=feed_link or "未知",
+        feed_description=feed_description or "无",
+        search_results=search_results,
+    )
     if not kb_data:
         return None
 
@@ -172,3 +255,31 @@ async def generate_knowledge_base(rss_url: str, rss_name: str) -> Optional[Dict[
 
     logger.info(f"[{rss_name}] 资料库生成成功")
     return kb_data
+
+
+async def generate_kb_for_rss(
+    rss_url: str,
+    rss_name: str,
+    feed_title: Optional[str] = None,
+    feed_link: Optional[str] = None,
+    feed_description: Optional[str] = None,
+) -> bool:
+    # 生成资料库（含失败处理），返回 True=成功/已存在，False=失败
+    try:
+        result = await generate_knowledge_base(
+            rss_url=rss_url,
+            rss_name=rss_name,
+            feed_title=feed_title,
+            feed_link=feed_link,
+            feed_description=feed_description,
+        )
+        return result is not None
+    except Exception as e:
+        logger.warning(f"[{rss_name}] 资料库生成异常: {e}")
+        return False
+
+
+def check_kb_missing(rss_name: str) -> bool:
+    # 检查资料库文件是否缺失，True=缺失
+    path = _get_kb_path(rss_name)
+    return not path.exists()

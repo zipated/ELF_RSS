@@ -59,6 +59,13 @@ class ELFConfig(Config):
     # 配合 deepl_translator 使用的语言检测接口，前往 https://detectlanguage.com/documentation 注册获取 api_key
     single_detection_api_key: Optional[str] = None
 
+    # 资料库搜索 API Key（火山引擎联网搜索），必须配置才能启用 kb 功能
+    kb_search_api_key: Optional[str] = None
+    # 资料库搜索指定站点范围，多个域名用 | 分隔，如 "aliyun.com|mp.qq.com"
+    kb_search_sites: Optional[str] = None
+    # 资料库搜索屏蔽站点，多个域名用 | 分隔
+    kb_search_block_hosts: Optional[str] = None
+
     qb_username: Optional[str] = None  # qbittorrent 用户名
     qb_password: Optional[str] = None  # qbittorrent 密码
     qb_web_url: Optional[str] = None  # qbittorrent 的 web 地址
@@ -83,20 +90,26 @@ config = get_plugin_config(ELFConfig)
 
 
 def _parse_ai_api_nodes(cfg: ELFConfig) -> List[Dict[str, Any]]:
-    """解析多节点 AI API 配置，支持 AI_API_KEY1/2/... 动态数量
-    AI_API_KEY 作为默认节点，编号节点追加在其后，两者可同时配置
-    """
+    # 解析多节点 AI API 配置，支持 AI_API_KEY1/2/... 动态数量
+    # AI_API_KEY 作为默认节点，编号节点追加在其后，两者可同时配置
     nodes: List[Dict[str, Any]] = []
     # 默认节点：AI_API_KEY
     if cfg.ai_api_key:
         default_use_proxy = os.environ.get("AI_API_USE_PROXY", "").lower() == "true"
+        default_kb_enabled = os.environ.get("AI_API_KB_ENABLED", "true").lower() != "false"
+        allowed_params_raw = os.environ.get("AI_API_ALLOWED_PARAMS")
+        allowed_params = json.loads(allowed_params_raw) if allowed_params_raw else None
+        if not allowed_params:
+            allowed_params = None
         nodes.append({
             "key": cfg.ai_api_key,
             "base_url": cfg.ai_api_base_url,
             "model": cfg.ai_api_model,
             "prompt": cfg.ai_api_prompt,
             "extra_params": cfg.ai_api_extra_params,
+            "allowed_openai_params": allowed_params,
             "use_proxy": default_use_proxy,
+            "kb_enabled": default_kb_enabled,
         })
     # 编号节点：AI_API_KEY1/2/... 追加在后面
     for i in range(1, 100):
@@ -107,15 +120,22 @@ def _parse_ai_api_nodes(cfg: ELFConfig) -> List[Dict[str, Any]]:
         model = os.environ.get(f"AI_API_MODEL{i}", cfg.ai_api_model)
         prompt = os.environ.get(f"AI_API_PROMPT{i}", cfg.ai_api_prompt)
         extra_params_raw = os.environ.get(f"AI_API_EXTRA_PARAMS{i}")
-        extra_params = json.loads(extra_params_raw) if extra_params_raw else cfg.ai_api_extra_params
+        extra_params = json.loads(extra_params_raw) if extra_params_raw else None
         use_proxy = os.environ.get(f"AI_API_USE_PROXY{i}", "").lower() == "true"
+        kb_enabled = os.environ.get(f"AI_API_KB_ENABLED{i}", "true").lower() != "false"
+        allowed_params_raw = os.environ.get(f"AI_API_ALLOWED_PARAMS{i}")
+        allowed_params = json.loads(allowed_params_raw) if allowed_params_raw else None
+        if not allowed_params:
+            allowed_params = None
         nodes.append({
             "key": key,
             "base_url": base_url,
             "model": model,
             "prompt": prompt,
             "extra_params": extra_params,
+            "allowed_openai_params": allowed_params,
             "use_proxy": use_proxy,
+            "kb_enabled": kb_enabled,
         })
     return nodes
 

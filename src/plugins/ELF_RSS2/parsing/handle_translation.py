@@ -107,9 +107,9 @@ def _build_system_prompt(
         else:
             prompt = base_prompt
     elif lang:
-        prompt = f"你是一个专业的多语言翻译器，请提供从{lang}到准确、自然且符合语境的简体中文翻译。"
+        prompt = f"你是一个专业的多语言翻译器，请提供从{lang}到准确、自然且符合语境的简体中文翻译，不需要解释和注解。"
     else:
-        prompt = "你是一个专业的多语言翻译器，请提供准确、自然且符合语境的简体中文翻译。"
+        prompt = "你是一个专业的多语言翻译器，请提供准确、自然且符合语境的简体中文翻译，不需要解释和注解。"
 
     if kb_data:
         kb_prompt = get_knowledge_base_prompt(kb_data)
@@ -123,15 +123,24 @@ def _build_litellm_kwargs(
     node: Dict[str, Any],
     messages: List[Dict[str, str]],
 ) -> Dict[str, Any]:
-    """将节点配置映射为 litellm.acompletion() 参数"""
+    # 将节点配置映射为 litellm.acompletion() 参数
+    model = node.get("model") or "gpt-4o-mini"
+    base_url = node.get("base_url")
+    # 自定义 endpoint 走 OpenAI 兼容协议，需要 openai/ 前缀
+    if base_url and "/" not in model:
+        model = f"openai/{model}"
+
     kwargs: Dict[str, Any] = {
-        "model": node.get("model") or "gpt-4o-mini",
+        "model": model,
         "messages": messages,
         "api_key": node["key"],
         "timeout": 30,
     }
-    if node.get("base_url"):
-        kwargs["base_url"] = node["base_url"]
+    if base_url:
+        kwargs["base_url"] = base_url
+    # litellm 参数放行白名单，强制透传非标准参数（如 thinking）
+    if node.get("allowed_openai_params"):
+        kwargs["allowed_openai_params"] = node["allowed_openai_params"]
     # extra_params 中的合法 litellm 参数透传
     if node.get("extra_params"):
         kwargs.update(node["extra_params"])
@@ -145,7 +154,7 @@ async def _ai_translate_with_node(
     rss_url: Optional[str] = None,
     kb_data: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """使用单个 API 节点进行翻译（通过 LiteLLM）"""
+    # 使用单个 API 节点进行翻译（通过 LiteLLM）
     lang = await _detect_lang(text)
     system_content = _build_system_prompt(node, lang, kb_data)
 

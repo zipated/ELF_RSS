@@ -54,6 +54,17 @@ async def start(bot: Bot) -> None:
     if not rss_list:
         await send_message_to_admin(f"{FIRST_BOOT_MESSAGE}\n{boot_message}", bot)
         logger.info(FIRST_BOOT_MESSAGE)
+    else:
+        # 启动时检查 kb 文件是否存在，不存在则关闭 kb 并通知管理员
+        from .parsing.knowledge_base import check_kb_missing
+
+        for rss in rss_list:
+            if rss.knowledge_base and check_kb_missing(rss.name):
+                rss.knowledge_base = False
+                rss.upsert()
+                msg = f"{rss.name}[{rss.get_url()}]的资料库文件丢失！已自动关闭该订阅的资料库功能！"
+                await send_message_to_admin(msg, bot)
+                logger.warning(msg)
     if plugin_config.enable_boot_message:
         await send_message_to_admin(f"{BOOT_SUCCESS_MESSAGE}\n{boot_message}", bot)
     logger.info(BOOT_SUCCESS_MESSAGE)

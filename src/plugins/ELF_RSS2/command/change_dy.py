@@ -1,7 +1,7 @@
 import re
 from contextlib import suppress
 from copy import deepcopy
-from typing import Any, List, Match, Optional
+from typing import Any, List, Match, Optional, Tuple
 
 from nonebot import on_command
 from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageEvent
@@ -15,7 +15,7 @@ from nonebot.rule import to_me
 from .. import my_trigger as tr
 from ..config import DATA_PATH
 from ..rss_class import Rss
-from ..utils import regex_validate
+from ..utils import regex_validate, send_message_to_admin
 
 RSS_CHANGE = on_command(
     "change",
@@ -263,7 +263,7 @@ async def handle_rss_change(
     rm_list_exist = re.search("rm_list='.+'", change_info)
     change_list = handle_rm_list(rss_list, change_info, rm_list_exist)
 
-    changed_rss_list = await batch_change_rss(
+    changed_rss_list, kb_results = await batch_change_rss(
         change_list, group_id, guild_channel_id, rss_list, rm_list_exist
     )
     # 隐私考虑，不展示除当前群组或频道外的群组、频道和QQ
@@ -274,6 +274,8 @@ async def handle_rss_change(
     if rss_msg_list:
         separator = "\n----------------------\n"
         result_msg += separator + separator.join(rss_msg_list)
+    if kb_results:
+        result_msg += "\n\n" + "\n".join(kb_results)
     await RSS_CHANGE.finish(result_msg)
 
 
@@ -307,8 +309,9 @@ async def batch_change_rss(
     guild_channel_id: Optional[str],
     rss_list: List[Rss],
     rm_list_exist: Optional[Match[str]] = None,
-) -> List[Rss]:
+) -> Tuple[List[Rss], List[str]]:
     changed_rss_list = []
+    kb_results: List[str] = []
 
     for rss in rss_list:
         new_rss = deepcopy(rss)
@@ -339,7 +342,11 @@ async def batch_change_rss(
             tr.delete_job(new_rss)
             logger.info(f"{rss_name} 已停止更新")
 
-    return changed_rss_list
+        # 如果 kb 从关闭变为开启，生成资料库
+        if new_rss.knowledge_base and not rss.knowledge_base:
+            kb_results.append(await _generate_kb_for_rss(new_rss))
+
+    return changed_rss_list, kb_results
 
 
 # 参数特殊处理：正文待移除内容
@@ -365,3 +372,17 @@ def handle_rm_list(
     change_list.pop(0)
 
     return change_list
+
+
+async def _generate_kb_for_rss(rss: Rss) -> str:
+    # 生成资料库，失败时自动关闭 kb 并通知管理员，返回状态信息
+    from ..parsing.knowledge_base import generate_kb_for_rss as do_generate
+
+    if await do_generate(rss_url=rss.get_url(), rss_name=rss.name):
+        return f"✅ {rss.name} 资料库生成成功"
+    rss.knowledge_base = False
+    rss.upsert()
+    msg = f"{rss.name}[{rss.get_url()}]资料库生成失败！已自动关闭该订阅的资料库功能！请检查 AI API 配置或网络连接！"
+    await send_message_to_admin(msg)
+    logger.warning(msg)
+    return f"⚠️ {rss.name} 资料库生成失败，已自动关闭"

@@ -111,17 +111,20 @@ async def start(rss: Rss) -> None:
         await save_first_time_fetch(rss, new_rss)
         # 首次抓取成功后，如果启用了资料库则生成
         if rss.knowledge_base:
-            try:
-                from .parsing.knowledge_base import generate_knowledge_base
+            from .parsing.knowledge_base import generate_kb_for_rss
 
-                result = await generate_knowledge_base(rss_url=rss.url, rss_name=rss.name)
-                if result is None:
-                    raise Exception("资料库生成返回为空")
-            except Exception as e:
-                logger.warning(f"{rss.name} 资料库生成失败: {e}")
+            feed = new_rss.get("feed", {})
+            if not await generate_kb_for_rss(
+                rss_url=rss.get_url(),
+                rss_name=rss.name,
+                feed_title=feed.get("title"),
+                feed_link=feed.get("link"),
+                feed_description=feed.get("description") or feed.get("subtitle"),
+            ):
+                logger.warning(f"{rss.name} 资料库生成失败")
                 rss.knowledge_base = False
                 rss.upsert()
-                msg = f"{rss.name}[{rss.get_url()}]资料库生成失败！已自动关闭该订阅的资料库功能！请检查 AI API 配置或网络连接！\n错误信息：{e}"
+                msg = f"{rss.name}[{rss.get_url()}]资料库生成失败！已自动关闭该订阅的资料库功能！请检查 AI API 配置或网络连接！"
                 await send_message_to_admin(msg, bot)
         return
 
