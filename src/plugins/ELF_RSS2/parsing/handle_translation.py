@@ -107,9 +107,9 @@ def _build_system_prompt(
         else:
             prompt = base_prompt
     elif lang:
-        prompt = f"你是一个专业的多语言翻译器，请提供从{lang}到准确、自然且符合语境的简体中文翻译，不需要解释和注解。"
+        prompt = f"你是一个专业的多语言翻译器，请将内容从{lang}翻译为准确、自然且符合语境的简体中文。仅输出翻译结果，不要添加任何解释、说明、补充或分析。"
     else:
-        prompt = "你是一个专业的多语言翻译器，请提供准确、自然且符合语境的简体中文翻译，不需要解释和注解。"
+        prompt = "你是一个专业的多语言翻译器，请翻译为准确、自然且符合语境的简体中文。仅输出翻译结果，不要添加任何解释、说明、补充或分析。"
 
     if kb_data:
         kb_prompt = get_knowledge_base_prompt(kb_data)
