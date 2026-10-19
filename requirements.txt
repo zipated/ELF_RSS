@@ -21,4 +21,4 @@ python-qbittorrent~=0.4.3
 tenacity~=8.5.0
 tinydb~=4.8.2
 yarl~=1.24.2
-any-llm-sdk~=1.37.0
+any-llm-sdk~=1.37.1
