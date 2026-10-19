@@ -122,8 +122,9 @@ def _parse_ai_api_nodes(cfg: ELFConfig) -> List[Dict[str, Any]]:
             "key": key,
             "provider": provider,
             # 未配置时沿用默认节点的 base_url / model / prompt
-            "base_url": node_base_url or cfg.ai_api_base_url,
-            "model": node_model or cfg.ai_api_model,
+            # 显式留空（如 AI_API_BASE_URL3=""）表示不使用默认节点取值，改用 provider 自带默认地址
+            "base_url": os.environ.get(f"AI_API_BASE_URL{i}", cfg.ai_api_base_url),
+            "model": os.environ.get(f"AI_API_MODEL{i}", cfg.ai_api_model),
             "prompt": os.environ.get(f"AI_API_PROMPT{i}", cfg.ai_api_prompt),
             "extra_params": extra_params,
             "use_proxy": os.environ.get(f"AI_API_USE_PROXY{i}", "").lower() == "true",
