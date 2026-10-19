@@ -24,7 +24,8 @@
 * 发送命令添加、删除、查询、修改 RSS 订阅
 * 交互式添加 RSSHub 订阅
 * 订阅内容翻译（支持 Google / 百度 / DeepL / AI 翻译）
-* AI 翻译基于 [LiteLLM](https://github.com/BerriAI/litellm)，支持 OpenAI、Anthropic、DeepSeek、Ollama 等多种服务商
+* AI 翻译基于 [any-llm](https://github.com/mozilla-ai/any-llm)，支持 OpenAI、Anthropic、DeepSeek、Ollama 等多种服务商
+* AI 翻译支持按节点配置服务商与额外参数，同一模型在不同服务商下的差异化参数可分别透传
 * AI 翻译支持多节点配置，按顺序自动切换，避免单点故障
 * AI 翻译支持会话上下文，同一 RSS 源的文章共享翻译上下文，保持术语一致
 * AI 翻译支持资料库功能，自动生成来源背景和术语表，提升翻译质量
@@ -72,7 +73,7 @@
 
 * [RSSHub](https://github.com/DIYgod/RSSHub)
 * [Nonebot](https://github.com/nonebot/nonebot2)
-* [LiteLLM](https://github.com/BerriAI/litellm)
+* [any-llm](https://github.com/mozilla-ai/any-llm)
 * [酷Q（R. I. P）](https://cqp.cc/)
 * [coolq-http-api](https://github.com/richardchien/coolq-http-api)
 * [go-cqhttp](https://github.com/Mrs4s/go-cqhttp)

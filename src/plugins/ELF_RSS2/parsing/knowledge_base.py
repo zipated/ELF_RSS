@@ -4,12 +4,10 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 import feedparser
-import litellm
 from nonebot.log import logger
 
 from ..config import DATA_PATH, config
-
-litellm.suppress_debug_info = True
+from .utils import build_ai_request, get_ai_client, get_completion_text
 
 KB_PATH = DATA_PATH / "kb"
 
@@ -157,29 +155,16 @@ async def _generate_kb_with_ai(
         search_results=_format_search_results(search_results),
     )
 
-    model = node.get("model") or "gpt-4o-mini"
-    base_url = node.get("base_url")
-    if base_url and "/" not in model:
-        model = f"openai/{model}"
-
-    kwargs: Dict[str, Any] = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": "你只输出 JSON，不输出其他内容。"},
-            {"role": "user", "content": prompt},
-        ],
-        "api_key": node["key"],
-        "timeout": 30,
-    }
-    if node.get("base_url"):
-        kwargs["base_url"] = node["base_url"]
-    if node.get("extra_params"):
-        kwargs.update(node["extra_params"])
+    messages: List[Dict[str, Any]] = [
+        {"role": "system", "content": "你只输出 JSON，不输出其他内容。"},
+        {"role": "user", "content": prompt},
+    ]
 
     try:
-        response = await litellm.acompletion(**kwargs)
-        content_text = response.choices[0].message.content
-        content_text = content_text.strip()
+        response = await get_ai_client(node).acompletion(
+            **build_ai_request(node, messages)
+        )
+        content_text = (get_completion_text(response) or "").strip()
         if content_text.startswith("```"):
             content_text = content_text.split("\n", 1)[1].rsplit("```", 1)[0]
         first_brace = content_text.find("{")

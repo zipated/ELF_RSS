@@ -1,21 +1,17 @@
 import hashlib
-import os
 import random
 import re
 from typing import Any, Dict, List, Optional
 
 import aiohttp
 import emoji
-import litellm
 from deep_translator import DeeplTranslator, GoogleTranslator, single_detection
 from nonebot.log import logger
 
 from ..config import config
 from .conversation import add_conversation, get_conversation_history
 from .knowledge_base import get_knowledge_base_prompt, load_knowledge_base
-
-# 关闭 litellm 内置的 debug 日志
-litellm.suppress_debug_info = True
+from .utils import build_ai_request, get_ai_client, get_completion_text
 
 LANGUAGE_MAP = {
     "ar": "阿拉伯语",
@@ -119,46 +115,17 @@ def _build_system_prompt(
     return prompt
 
 
-def _build_litellm_kwargs(
-    node: Dict[str, Any],
-    messages: List[Dict[str, str]],
-) -> Dict[str, Any]:
-    # 将节点配置映射为 litellm.acompletion() 参数
-    model = node.get("model") or "gpt-4o-mini"
-    base_url = node.get("base_url")
-    # 自定义 endpoint 走 OpenAI 兼容协议，需要 openai/ 前缀
-    if base_url and "/" not in model:
-        model = f"openai/{model}"
-
-    kwargs: Dict[str, Any] = {
-        "model": model,
-        "messages": messages,
-        "api_key": node["key"],
-        "timeout": 30,
-    }
-    if base_url:
-        kwargs["base_url"] = base_url
-    # litellm 参数放行白名单，强制透传非标准参数（如 thinking）
-    if node.get("allowed_openai_params"):
-        kwargs["allowed_openai_params"] = node["allowed_openai_params"]
-    # extra_params 中的合法 litellm 参数透传
-    if node.get("extra_params"):
-        kwargs.update(node["extra_params"])
-    return kwargs
-
-
 async def _ai_translate_with_node(
     text: str,
-    proxy: Optional[str],
     node: Dict[str, Any],
     rss_url: Optional[str] = None,
     kb_data: Optional[Dict[str, Any]] = None,
 ) -> str:
-    # 使用单个 API 节点进行翻译（通过 LiteLLM）
+    # 使用单个 API 节点进行翻译
     lang = await _detect_lang(text)
     system_content = _build_system_prompt(node, lang, kb_data)
 
-    messages: List[Dict[str, str]] = []
+    messages: List[Dict[str, Any]] = []
 
     # 注入同来源的会话历史，保持术语一致性
     if rss_url:
@@ -168,20 +135,12 @@ async def _ai_translate_with_node(
     messages.append({"role": "system", "content": system_content})
     messages.append({"role": "user", "content": text})
 
-    kwargs = _build_litellm_kwargs(node, messages)
-
-    # 按节点配置决定是否用代理：litellm 通过 HTTP_PROXY/HTTPS_PROXY 环境变量读取代理
-    old_http_proxy = None
-    old_https_proxy = None
-    if node.get("use_proxy") and proxy:
-        old_http_proxy = os.environ.get("HTTP_PROXY")
-        old_https_proxy = os.environ.get("HTTPS_PROXY")
-        os.environ["HTTP_PROXY"] = proxy
-        os.environ["HTTPS_PROXY"] = proxy
-
     try:
-        response = await litellm.acompletion(**kwargs)
-        content = response.choices[0].message.content
+        # 代理按节点绑定在客户端上，不再改动全局环境变量，多节点并发互不影响
+        response = await get_ai_client(node).acompletion(
+            **build_ai_request(node, messages)
+        )
+        content = get_completion_text(response)
         model_name = node.get("model") or "unknown"
         return f"\nAI翻译({model_name})：\n{content}"
     except Exception as e:
@@ -189,21 +148,10 @@ async def _ai_translate_with_node(
         error_msg = f"\nAI({model_name})翻译失败：{e}\n"
         logger.warning(error_msg)
         raise Exception(error_msg) from e
-    finally:
-        # 恢复代理环境变量
-        if old_http_proxy is not None:
-            os.environ["HTTP_PROXY"] = old_http_proxy
-        else:
-            os.environ.pop("HTTP_PROXY", None)
-        if old_https_proxy is not None:
-            os.environ["HTTPS_PROXY"] = old_https_proxy
-        else:
-            os.environ.pop("HTTPS_PROXY", None)
 
 
 async def ai_translator(
     text: str,
-    proxy: Optional[str],
     rss_name: Optional[str] = None,
     rss_url: Optional[str] = None,
 ) -> str:
@@ -217,7 +165,6 @@ async def ai_translator(
         try:
             result = await _ai_translate_with_node(
                 text=text,
-                proxy=proxy,
                 node=node,
                 rss_url=rss_url,
                 kb_data=kb_data,
@@ -262,7 +209,6 @@ async def handle_translation(
             try:
                 text = await ai_translator(
                     text=text,
-                    proxy=proxy,
                     rss_name=rss_name,
                     rss_url=rss_url,
                 )

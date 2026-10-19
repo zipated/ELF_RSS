@@ -56,6 +56,7 @@ class ELFConfig(Config):
     ai_api_model: Optional[str] = None
     ai_api_prompt: Optional[str] = None
     ai_api_extra_params: Optional[Dict] = None
+    ai_api_provider: Optional[str] = None
     # 配合 deepl_translator 使用的语言检测接口，前往 https://detectlanguage.com/documentation 注册获取 api_key
     single_detection_api_key: Optional[str] = None
 
@@ -93,49 +94,40 @@ def _parse_ai_api_nodes(cfg: ELFConfig) -> List[Dict[str, Any]]:
     # 解析多节点 AI API 配置，支持 AI_API_KEY1/2/... 动态数量
     # AI_API_KEY 作为默认节点，编号节点追加在其后，两者可同时配置
     nodes: List[Dict[str, Any]] = []
-    # 默认节点：AI_API_KEY
-    if cfg.ai_api_key:
-        default_use_proxy = os.environ.get("AI_API_USE_PROXY", "").lower() == "true"
-        default_kb_enabled = os.environ.get("AI_API_KB_ENABLED", "true").lower() != "false"
-        allowed_params_raw = os.environ.get("AI_API_ALLOWED_PARAMS")
-        allowed_params = json.loads(allowed_params_raw) if allowed_params_raw else None
-        if not allowed_params:
-            allowed_params = None
+    # 默认节点：AI_API_KEY 等无编号配置，自部署服务可以只填 provider 和 base_url
+    if cfg.ai_api_key or cfg.ai_api_base_url or cfg.ai_api_provider:
         nodes.append({
             "key": cfg.ai_api_key,
+            "provider": cfg.ai_api_provider,
             "base_url": cfg.ai_api_base_url,
             "model": cfg.ai_api_model,
             "prompt": cfg.ai_api_prompt,
             "extra_params": cfg.ai_api_extra_params,
-            "allowed_openai_params": allowed_params,
-            "use_proxy": default_use_proxy,
-            "kb_enabled": default_kb_enabled,
+            "use_proxy": os.environ.get("AI_API_USE_PROXY", "").lower() == "true",
+            "kb_enabled": os.environ.get("AI_API_KB_ENABLED", "true").lower() != "false",
         })
     # 编号节点：AI_API_KEY1/2/... 追加在后面
     for i in range(1, 100):
         key = os.environ.get(f"AI_API_KEY{i}")
-        if not key:
-            break
-        base_url = os.environ.get(f"AI_API_BASE_URL{i}", cfg.ai_api_base_url)
-        model = os.environ.get(f"AI_API_MODEL{i}", cfg.ai_api_model)
-        prompt = os.environ.get(f"AI_API_PROMPT{i}", cfg.ai_api_prompt)
+        provider = os.environ.get(f"AI_API_PROVIDER{i}")
+        node_base_url = os.environ.get(f"AI_API_BASE_URL{i}")
+        node_model = os.environ.get(f"AI_API_MODEL{i}")
+        # 无 key 的自部署节点只需配置 provider 或 base_url，因此不能以 key 是否存在作为判断依据
+        # 未配置任何一项则跳过该编号继续向后扫描，避免中间空号导致后续节点被静默丢弃
+        if not any([key, provider, node_base_url, node_model]):
+            continue
         extra_params_raw = os.environ.get(f"AI_API_EXTRA_PARAMS{i}")
         extra_params = json.loads(extra_params_raw) if extra_params_raw else None
-        use_proxy = os.environ.get(f"AI_API_USE_PROXY{i}", "").lower() == "true"
-        kb_enabled = os.environ.get(f"AI_API_KB_ENABLED{i}", "true").lower() != "false"
-        allowed_params_raw = os.environ.get(f"AI_API_ALLOWED_PARAMS{i}")
-        allowed_params = json.loads(allowed_params_raw) if allowed_params_raw else None
-        if not allowed_params:
-            allowed_params = None
         nodes.append({
             "key": key,
-            "base_url": base_url,
-            "model": model,
-            "prompt": prompt,
+            "provider": provider,
+            # 未配置时沿用默认节点的 base_url / model / prompt
+            "base_url": node_base_url or cfg.ai_api_base_url,
+            "model": node_model or cfg.ai_api_model,
+            "prompt": os.environ.get(f"AI_API_PROMPT{i}", cfg.ai_api_prompt),
             "extra_params": extra_params,
-            "allowed_openai_params": allowed_params,
-            "use_proxy": use_proxy,
-            "kb_enabled": kb_enabled,
+            "use_proxy": os.environ.get(f"AI_API_USE_PROXY{i}", "").lower() == "true",
+            "kb_enabled": os.environ.get(f"AI_API_KB_ENABLED{i}", "true").lower() != "false",
         })
     return nodes
 
